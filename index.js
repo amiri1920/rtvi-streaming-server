@@ -1,43 +1,46 @@
-const express = require('express');
-const path = require('path');
+const express = require("express");
+const cors = require("cors");
+
 const app = express();
-
-// Middleware to parse JSON bodies
 app.use(express.json());
+app.use(cors());
 
-// Serve static files from the 'public' directory
-app.use(express.static(path.join(__dirname, 'public')));
+app.post("/webhook/rtvi", (req, res) => {
+    console.log("Received payload:", JSON.stringify(req.body, null, 2));
 
-app.post('/webhook/rtvi', (req, res) => {
-  // Set headers for a streaming response
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Transfer-Encoding', 'chunked');
+    // Set headers for SSE (Server-Sent Events)
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
-  // Log the incoming payload for debugging
-  console.log('Received payload:', req.body);
+    // Extract function name and tool_call_id
+    const { function_name, tool_call_id } = req.body;
 
-  // Check for the expected function call
-  const data = req.body && req.body.body ? req.body.body : req.body;
-  if (data.function_name === 'hangup_voicemail') {
-    // Prepare the RTVI hangup action chunk
-    const rtvichunk = JSON.stringify({
-      rtviaction: 'hangup',
-      details: { reason: 'voicemail detected' }
-    });
+    // Check if the function is "hangup_voicemail"
+    if (function_name === "hangup_voicemail") {
+        // Send streaming response in SSE format
+        res.write(`event: action\n`);
+        res.write(`data: ${JSON.stringify({
+            service: "rtvi",
+            action: "hangup",
+            arguments: { reason: "voicemail detected" },
+            tool_call_id: tool_call_id // Ensure it is mapped correctly
+        })}\n\n`);
 
-    // Write the chunk and add a newline (optional for clarity)
-    res.write(rtvichunk + "\n");
-  } else {
-    // Optionally, send an empty action or an error message
-    res.write(JSON.stringify({ message: 'No valid action detected' }) + "\n");
-  }
+        // Send event to close connection
+        res.write(`event: close\n\n`);
 
-  // End the streaming response
-  res.end();
+        // End the response after sending data
+        res.end();
+        console.log(`✅ Sent hangup action for call ${tool_call_id}`);
+    } else {
+        console.log("❌ Unsupported function:", function_name);
+        res.status(400).json({ error: "Unsupported function" });
+    }
 });
 
-// Start the server on the specified port
-const PORT = process.env.PORT || 3000;
+// Start server
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Streaming server running on port ${PORT}`);
+    console.log(`🚀 Streaming server running on port ${PORT}`);
 });
